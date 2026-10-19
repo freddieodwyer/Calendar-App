@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#111111">
+<title>Who's free?</title>
+<style>
+  :root { --bg:#fff; --fg:#111; --muted:#6b7280; --card:#f3f4f6; --free:#16a34a; --busy:#dc2626; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111; --fg:#f3f4f6; --muted:#9ca3af; --card:#1f2937; }
+  }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:480px; margin:0 auto; padding:20px 16px 40px; }
+  h1 { font-size:1.4rem; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:.9rem; margin-bottom:20px; }
+  h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:24px 0 8px; }
+  .row { display:flex; justify-content:space-between; align-items:center;
+         background:var(--card); border-radius:12px; padding:14px 16px; margin-bottom:8px; }
+  .name { font-weight:600; }
+  .until { color:var(--muted); font-size:.9rem; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:10px; }
+  .free .dot { background:var(--free); }
+  .busy .dot { background:var(--busy); }
+  .off .dot, .error .dot { background:var(--muted); }
+  .empty { color:var(--muted); font-size:.95rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Who's free?</h1>
+  <div class="sub" id="sub">Loading...</div>
+  <div id="list"></div>
+</main>
+<script>
+const REFRESH_MS = 60000;
+const SECTIONS = [
+  ["free", "Free now"],
+  ["busy", "Busy"],
+  ["off", "Outside 9-5 / weekend"],
+  ["error", "Couldn't load"],
+];
+
+function untilText(person) {
+  if (!person.until) return "";
+  return person.status === "free" ? "free until " + person.until : "busy until " + person.until;
+}
+
+function makeRow(person) {
+  const row = document.createElement("div");
+  row.className = "row " + person.status;
+  const left = document.createElement("span");
+  const dot = document.createElement("span");
+  dot.className = "dot";
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = person.name;
+  left.append(dot, name);
+  const until = document.createElement("span");
+  until.className = "until";
+  until.textContent = untilText(person);
+  row.append(left, until);
+  return row;
+}
+
+function render(data) {
+  document.getElementById("sub").textContent = "Updated " + data.time;
+  const list = document.getElementById("list");
+  list.replaceChildren();
+  for (const [status, title] of SECTIONS) {
+    const group = data.people.filter(p => p.status === status);
+    if (group.length === 0) continue;
+    const h = document.createElement("h2");
+    h.textContent = title;
+    list.append(h, ...group.map(makeRow));
+  }
+}
+
+async function load() {
+  try {
+    const res = await fetch("/api/free");
+    render(await res.json());
+  } catch (e) {
+    document.getElementById("sub").textContent = "Can't reach the server";
+  }
+}
+
+load();
+setInterval(load, REFRESH_MS);
+</script>
+</body>
+</html>

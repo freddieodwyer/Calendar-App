@@ -1,0 +1,5 @@
+flask
+icalendar
+recurring-ical-events
+waitress
+gunicorn

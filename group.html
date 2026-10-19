@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Who's free?</title>
+<style>
+:root { --bg:#fff; --fg:#111; --muted:#6b7280; --card:#f3f4f6; --free:#16a34a; --busy:#dc2626; --accent:#2563eb; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#111; --fg:#f3f4f6; --muted:#9ca3af; --card:#1f2937; }
+}
+body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+main { max-width:480px; margin:0 auto; padding:20px 16px 48px; }
+h1 { font-size:1.4rem; margin:0 0 4px; }
+h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:24px 0 8px; }
+.sub { color:var(--muted); font-size:.9rem; margin-bottom:20px; }
+.row { display:flex; justify-content:space-between; align-items:center;
+       background:var(--card); border-radius:12px; padding:14px 16px; margin-bottom:8px; }
+.name { font-weight:600; }
+.until { color:var(--muted); font-size:.9rem; }
+.dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:10px; }
+.free .dot { background:var(--free); }
+.busy .dot { background:var(--busy); }
+.off .dot, .error .dot { background:var(--muted); }
+.empty, .note { color:var(--muted); font-size:.9rem; }
+form { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+input[type=text], input[type=url], input[type=datetime-local] { padding:12px; border-radius:10px; border:1px solid var(--muted);
+       background:var(--bg); color:var(--fg); font-size:1rem; }
+button { padding:12px; border:0; border-radius:10px; background:var(--accent); color:#fff;
+         font-size:1rem; cursor:pointer; }
+button.secondary { background:var(--card); color:var(--fg); }
+button.danger { background:var(--busy); }
+details { margin-top:28px; background:var(--card); border-radius:12px; padding:14px 16px; }
+summary { font-weight:600; cursor:pointer; }
+.error-msg { color:var(--busy); font-size:.9rem; }
+.linkbox { word-break:break-all; background:var(--bg); padding:10px; border-radius:8px; font-size:.85rem; margin:8px 0; }
+[hidden] { display:none !important; }
+.btn { display:block; text-align:center; padding:12px; border-radius:10px; background:var(--card);
+       color:var(--fg); text-decoration:none; margin-top:20px; font-weight:600; }
+.banner { background:var(--card); border-radius:12px; padding:12px 16px; margin-bottom:16px; font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Who's free?</h1>
+  <div class="sub" id="sub">Loading...</div>
+  <div class="banner" id="weekend" hidden>It's the weekend</div>
+  <div id="list"></div>
+
+  <a class="btn" id="manage-group" hidden>Manage group</a>
+
+  <details id="test-box" hidden>
+    <summary>Test time</summary>
+    <form id="test-form">
+      <input type="datetime-local" id="test-at">
+      <button type="submit" class="secondary">Show this time</button>
+      <button type="button" class="secondary" id="test-reset">Back to now</button>
+    </form>
+    <p class="note">Pick any day and time to see who'd be free then.</p>
+  </details>
+
+  <details id="add">
+    <summary>Add me</summary>
+    <form id="form">
+      <input type="text" name="name" placeholder="Your name" maxlength="30" required>
+      <input type="url" name="link" placeholder="Calendar link (https:// or webcal://)">
+      <label class="note">or upload an .ics file
+        <input type="file" name="file" accept=".ics,text/calendar">
+      </label>
+      <button type="submit">Add my calendar</button>
+      <div class="error-msg" id="error"></div>
+    </form>
+    <p class="note">Only free/busy times are kept. Event titles, locations and attendees are discarded.</p>
+    <div id="done" hidden>
+      <p><strong>You're in.</strong> Save this private link. It's the only way to update or remove your calendar.</p>
+      <div class="linkbox" id="manage-link"></div>
+      <button type="button" class="secondary" id="copy-manage">Copy private link</button>
+    </div>
+  </details>
+
+  <details>
+    <summary>Share this group</summary>
+    <div class="linkbox" id="group-link"></div>
+    <button type="button" class="secondary" id="copy-group">Copy group link</button>
+  </details>
+</main>
+<script>
+const GROUP_ID = location.pathname.split("/")[2];
+const REFRESH_MS = 60000;
+let testAt = null;
+const SECTIONS = [
+  ["free", "Free now"],
+  ["busy", "Busy"],
+  ["error", "Couldn't load"],
+];
+
+function untilText(person) {
+  if (person.status === "free") {
+    return person.until ? "free until " + person.until : "free for the rest of the day";
+  }
+  if (person.status === "busy") return "busy until " + person.until;
+  return "";
+}
+
+function makeRow(person) {
+  const row = document.createElement("div");
+  row.className = "row " + person.status;
+  const left = document.createElement("span");
+  const dot = document.createElement("span");
+  dot.className = "dot";
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = person.name;
+  left.append(dot, name);
+  const until = document.createElement("span");
+  until.className = "until";
+  until.textContent = untilText(person);
+  row.append(left, until);
+  return row;
+}
+
+function render(data) {
+  document.getElementById("title").textContent = data.group;
+  document.title = data.group;
+  document.getElementById("sub").textContent =
+    (testAt ? "Test time: " + data.day + " " : "Updated ") + data.time;
+  document.getElementById("test-box").hidden = !data.test_mode;
+  document.getElementById("weekend").hidden = !data.weekend;
+  const list = document.getElementById("list");
+  list.replaceChildren();
+  if (data.people.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "Nobody's added a calendar yet. Open 'Add me' below.";
+    list.append(empty);
+    return;
+  }
+  for (const [status, title] of SECTIONS) {
+    const group = data.people.filter(p => p.status === status);
+    if (group.length === 0) continue;
+    const h = document.createElement("h2");
+    h.textContent = title;
+    list.append(h, ...group.map(makeRow));
+  }
+}
+
+async function load() {
+  try {
+    const query = testAt ? "?at=" + encodeURIComponent(testAt) : "";
+    const res = await fetch("/api/g/" + GROUP_ID + "/free" + query);
+    render(await res.json());
+  } catch (e) {
+    document.getElementById("sub").textContent = "Can't reach the server";
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    window.prompt("Copy this link:", text);
+  }
+}
+
+document.getElementById("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const error = document.getElementById("error");
+  error.textContent = "";
+  const res = await fetch("/api/g/" + GROUP_ID + "/people", {
+    method: "POST",
+    body: new FormData(e.target),
+  });
+  const data = await res.json().catch(() => ({error: "Something went wrong. Try again."}));
+  if (!res.ok) { error.textContent = data.error; return; }
+  const link = location.origin + data.manage_url;
+  document.getElementById("manage-link").textContent = link;
+  document.getElementById("copy-manage").onclick = () => copyText(link);
+  document.getElementById("done").hidden = false;
+  e.target.reset();
+  load();
+});
+
+document.getElementById("test-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  testAt = document.getElementById("test-at").value || null;
+  load();
+});
+
+document.getElementById("test-reset").onclick = () => {
+  testAt = null;
+  document.getElementById("test-at").value = "";
+  load();
+};
+
+document.getElementById("group-link").textContent = location.href;
+document.getElementById("copy-group").onclick = () => copyText(location.href);
+
+try {
+  const adminCode = localStorage.getItem("admin:" + GROUP_ID);
+  if (adminCode) {
+    const button = document.getElementById("manage-group");
+    button.href = "/admin/" + adminCode;
+    button.hidden = false;
+  }
+} catch (e) {}
+
+load();
+setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+</script>
+</body>
+</html>
